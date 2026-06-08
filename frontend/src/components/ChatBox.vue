@@ -43,6 +43,10 @@
         </div>
         <div class="message-body">
           <div class="message-name">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
+          <!-- 用户粘贴的图片 -->
+          <div v-if="msg.imageData" class="message-image">
+            <img :src="'data:image/png;base64,' + msg.imageData" alt="用户图片" />
+          </div>
           <div class="message-content markdown-body" v-html="renderMarkdown(msg.content)"></div>
           <div v-if="msg.role === 'assistant'" class="message-actions">
             <button v-if="msg.excelMode" class="action-btn excel-btn" @click="downloadExcel(msg.content)" title="下载 Excel">
@@ -75,6 +79,13 @@
     <div class="input-area">
       <div class="input-container">
         <div class="input-wrapper">
+          <!-- 模型选择 -->
+          <select class="model-select" v-model="selectedModel" :disabled="loading">
+            <option v-for="(m, key) in models" :key="key" :value="key">
+              {{ m.label }} ({{ m.model }})
+            </option>
+          </select>
+
           <button
             class="mode-toggle excel-toggle"
             :class="{ active: excelMode }"
@@ -98,25 +109,33 @@
             v-model="inputText"
             @keydown.enter.exact="sendMessage"
             @keydown.enter.shift="insertNewline"
+            @paste="handlePaste"
             placeholder="给 AI 助手发送消息"
             rows="1"
             :disabled="loading"
           ></textarea>
+          <!-- 图片预览 -->
+          <div v-if="pastedImage" class="image-preview" @click="clearImage" :title="'点击移除图片'">
+            <img :src="pastedImage" />
+            <span class="image-remove">×</span>
+          </div>
           <button
             class="send-btn"
-            :class="{ active: inputText.trim() && !loading }"
-            :disabled="!inputText.trim() || loading"
+            :class="{ active: (inputText.trim() || pastedImage) && !loading }"
+            :disabled="!inputText.trim() && !pastedImage || loading"
             @click="sendMessage"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </div>
         <p class="input-footer">
-          <template v-if="excelMode && webSearch">
+          <span v-if="pastedImage" class="image-hint">🖼️ 已粘贴图片</span>
+          <template v-else-if="excelMode && webSearch">
             <span class="excel-mode-hint">📊 Excel 模式 + 🌐 搜索模式 已同时开启</span>
           </template>
           <span v-else-if="excelMode" class="excel-mode-hint">📊 Excel 整理模式已开启，AI 回复将提供表格下载</span>
           <span v-else-if="webSearch" class="search-mode-hint">🌐 网页搜索模式已开启，AI 将搜索网络获取最新信息</span>
+          <span v-else-if="!currentModelSupportsImage" class="model-hint">💡 选择通义千问可粘贴图片</span>
           <span v-else>AI 助手可能会产生不准确的信息，请注意甄别。</span>
         </p>
       </div>
@@ -125,8 +144,9 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch } from "vue";
+import { ref, nextTick, watch, onMounted, computed } from "vue";
 import { marked } from "marked";
+import axios from "axios";
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -140,6 +160,23 @@ const inputRef = ref(null);
 const messagesRef = ref(null);
 const excelMode = ref(false);
 const webSearch = ref(false);
+const selectedModel = ref("deepseek");
+const models = ref({});
+const pastedImage = ref(null); // base64 data URL
+
+// 当前选择模型是否支持图片
+const currentModelSupportsImage = computed(() => {
+  const m = models.value[selectedModel.value];
+  return m ? m.supports_image : false;
+});
+
+// 加载模型列表
+onMounted(async () => {
+  try {
+    const res = await axios.get("/api/models/");
+    models.value = res.data;
+  } catch { /* ignore */ }
+});
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -150,16 +187,36 @@ function renderMarkdown(text) {
 function sendMessage(e) {
   if (e && e.shiftKey) return;
   const text = inputText.value.trim();
-  if (!text || props.loading) return;
-  emit("send", { text, excelMode: excelMode.value, webSearch: webSearch.value });
+  if ((!text && !pastedImage.value) || props.loading) return;
+  emit("send", {
+    text: text || "请分析这张图片",
+    excelMode: excelMode.value,
+    webSearch: webSearch.value,
+    model: selectedModel.value,
+    imageData: extractBase64(pastedImage.value),
+  });
   inputText.value = "";
+  pastedImage.value = null; // 发送后清除图片
   inputRef.value?.focus();
 }
 
 function sendSuggestion(text) {
   if (props.loading) return;
-  emit("send", { text, excelMode: excelMode.value, webSearch: webSearch.value });
+  emit("send", {
+    text,
+    excelMode: excelMode.value,
+    webSearch: webSearch.value,
+    model: selectedModel.value,
+    imageData: null,
+  });
   inputRef.value?.focus();
+}
+
+// 从 data URL 中提取纯 base64 字符串
+function extractBase64(dataUrl) {
+  if (!dataUrl) return null;
+  const parts = dataUrl.split(",");
+  return parts.length > 1 ? parts[1] : null;
 }
 
 function insertNewline(e) {
@@ -217,6 +274,28 @@ function downloadExcel(content) {
     .catch(() => alert("导出失败，请检查网络连接"));
 }
 
+function handlePaste(e) {
+  if (!currentModelSupportsImage.value) return; // 仅 qwen 可粘贴图片
+  const items = e.clipboardData.items;
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        pastedImage.value = ev.target.result; // data:image/png;base64,...
+      };
+      reader.readAsDataURL(file);
+      break;
+    }
+  }
+}
+
+function clearImage() {
+  pastedImage.value = null;
+}
+
 watch(
   () => props.messages.length,
   () => {
@@ -233,6 +312,12 @@ watch(() => inputText.value, () => {
     const el = inputRef.value;
     if (el) autoResize(el);
   });
+});
+
+watch(selectedModel, (newModel) => {
+  if (newModel === "ernie-bot") {
+    pastedImage.value = null;
+  }
 });
 </script>
 
@@ -363,6 +448,20 @@ watch(() => inputText.value, () => {
   color: #333;
 }
 
+/* 对话中的图片 */
+.message-image {
+  margin: 8px 0;
+  max-width: 400px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+}
+.message-image img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 /* Markdown 样式 */
 .message-content :deep(p) { margin-bottom: 10px; }
 .message-content :deep(p:last-child) { margin-bottom: 0; }
@@ -488,7 +587,7 @@ watch(() => inputText.value, () => {
   background: #ffffff;
   border: 1px solid #e0e0e0;
   border-radius: 12px;
-  padding: 8px 8px 8px 16px;
+  padding: 8px 8px 8px 12px;
   transition: box-shadow 0.2s, border-color 0.2s;
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
@@ -498,24 +597,25 @@ watch(() => inputText.value, () => {
   box-shadow: 0 2px 12px rgba(26,115,232,0.12);
 }
 
-textarea {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  padding: 6px 0;
-  color: #1a1a1a;
-  font-size: 15px;
+/* 模型选择 */
+.model-select {
+  padding: 5px 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 12px;
   font-family: inherit;
-  resize: none;
-  line-height: 1.5;
-  max-height: 200px;
+  color: #333;
+  background: #fafafa;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+  max-width: 200px;
 }
+.model-select:hover { border-color: #ccc; }
+.model-select:focus { border-color: #1a73e8; }
+.model-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
-textarea::placeholder {
-  color: #bbb;
-}
-
+/* 模式切换按钮（原始样式） */
 .mode-toggle {
   display: flex;
   align-items: center;
@@ -549,52 +649,52 @@ textarea::placeholder {
   color: #1a73e8;
 }
 
-.send-btn {
-  width: 36px;
-  height: 36px;
+textarea {
+  flex: 1;
+  background: transparent;
   border: none;
-  background: #e5e5e5;
+  outline: none;
+  padding: 6px 0;
+  color: #1a1a1a;
+  font-size: 15px;
+  font-family: inherit;
+  resize: none;
+  line-height: 1.5;
+  max-height: 200px;
+  min-width: 120px;
+}
+
+/* 图片预览 */
+.image-preview {
+  position: relative;
+  width: 60px;
+  height: 60px;
   border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #1a73e8;
   cursor: pointer;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+.image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.image-remove {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 18px;
+  height: 18px;
+  background: #ff4444;
+  color: #fff;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.send-btn.active {
-  background: #1a73e8;
-  color: white;
-}
-
-.send-btn.active:hover {
-  background: #1557b0;
-}
-
-.send-btn:disabled {
-  cursor: not-allowed;
-}
-
-.input-footer {
   font-size: 12px;
-  color: #bbb;
-  text-align: center;
-  margin-top: 8px;
-}
-
-.excel-mode-hint {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: 12px;
-  color: #2e7d32;
-}
-
-.search-mode-hint {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: 12px;
-  color: #1a73e8;
+  font-weight: bold;
+  line-height: 1;
 }
 </style>

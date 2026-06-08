@@ -11,10 +11,27 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """通用 LLM API 客户端，兼容 OpenAI 格式的接口。"""
 
-    def __init__(self):
-        self.api_key = settings.LLM_API_KEY
-        self.api_url = settings.LLM_API_URL
-        self.model = settings.LLM_MODEL
+    def __init__(self, provider="deepseek"):
+        """初始化 LLM 客户端。
+        Args:
+            provider: 模型供应商，'deepseek' 或 'qwen'
+        """
+        providers = {
+            "deepseek": {
+                "api_key": settings.LLM_API_KEY,
+                "api_url": settings.LLM_API_URL,
+                "model": settings.LLM_MODEL,
+            },
+            "qwen": {
+                "api_key": settings.QWEN_API_KEY,
+                "api_url": settings.QWEN_API_URL,
+                "model": settings.QWEN_MODEL,
+            },
+        }
+        config = providers.get(provider, providers["deepseek"])
+        self.api_key = config["api_key"]
+        self.api_url = config["api_url"]
+        self.model = config["model"]
 
     def chat(self, messages, stream=False, temperature=0.7, max_tokens=2048):
         """发送对话请求到 LLM API。
@@ -61,23 +78,35 @@ class LLMClient:
             logger.error(f"LLM API 请求失败: {e}")
             raise
 
+    def _stream_lines(self, response):
+        for line in response.iter_lines(chunk_size=1, decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+
+            yield data_str
+
+    def _extract_delta_content(self, data_str):
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            return ""
+
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+
+        delta = choices[0].get("delta") or {}
+        return delta.get("content") or ""
+
     def _handle_stream(self, response):
         """处理流式响应。"""
         full_content = ""
-        for line in response.iter_lines():
-            if line:
-                line = line.decode("utf-8")
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                        delta = data["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        full_content += content
-                    except json.JSONDecodeError:
-                        continue
+        for data_str in self._stream_lines(response):
+            full_content += self._extract_delta_content(data_str)
         return full_content
 
     def chat_stream(self, messages, temperature=0.7, max_tokens=2048):
@@ -105,21 +134,10 @@ class LLMClient:
             )
             response.raise_for_status()
 
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode("utf-8")
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            delta = data["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+            for data_str in self._stream_lines(response):
+                content = self._extract_delta_content(data_str)
+                if content:
+                    yield content
 
         except requests.exceptions.RequestException as e:
             logger.error(f"LLM 流式 API 请求失败: {e}")

@@ -110,6 +110,8 @@ def chat_stream(request):
     user_message = body.get("message", "").strip()
     history = body.get("history", [])
     web_search_enabled = body.get("web_search", False)
+    model_provider = body.get("model", "deepseek")  # 默认 deepseek
+    image_data = body.get("image_data", None)  # base64 图片（仅 qwen 支持）
 
     if not user_message:
         return HttpResponse(status=400)
@@ -123,14 +125,24 @@ def chat_stream(request):
             search_results = web_search(user_message)
             if search_results:
                 search_context = format_search_context(user_message, search_results)
-                # 将搜索结果作为 system 消消息注入
                 messages.append({"role": "system", "content": search_context})
                 yield f"data: {json.dumps({'type': 'status', 'content': f'已获取 {len(search_results)} 条搜索结果'})}\n\n".encode("utf-8")
 
-        messages.append({"role": "user", "content": user_message})
+        # 构建用户消息（支持图片多模态）
+        if image_data:
+            user_msg = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_message},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}},
+                ],
+            }
+        else:
+            user_msg = {"role": "user", "content": user_message}
+        messages.append(user_msg)
 
         try:
-            client = LLMClient()
+            client = LLMClient(provider=model_provider)
             full_content = ""
             for chunk in client.chat_stream(messages):
                 full_content += chunk
@@ -150,3 +162,16 @@ def chat_stream(request):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+@api_view(["GET"])
+def available_models(request):
+    """获取可用的模型列表（不含敏感字段）。"""
+    models = {}
+    for key, cfg in settings.AVAILABLE_MODELS.items():
+        models[key] = {
+            "label": cfg["label"],
+            "model": cfg["model"],
+            "supports_image": cfg["supports_image"],
+        }
+    return Response(models)

@@ -2,9 +2,9 @@
   <div class="profile-view">
     <div class="profile-card">
       <div class="profile-avatar">
-        <span class="avatar-text">U</span>
+        <span class="avatar-text">{{ user ? user.username.charAt(0).toUpperCase() : '?' }}</span>
       </div>
-      <h2 class="profile-name">用户</h2>
+      <h2 class="profile-name">{{ user ? user.username : '未登录' }}</h2>
       <p class="profile-desc">基于大语言模型的智能问答系统</p>
 
       <div class="profile-stats">
@@ -20,12 +20,16 @@
 
       <div class="profile-info">
         <div class="info-row">
-          <span class="info-label">系统版本</span>
-          <span class="info-value">v1.0.0</span>
+          <span class="info-label">用户名</span>
+          <span class="info-value">{{ user ? user.username : '-' }}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">LLM 状态</span>
-          <span class="info-value status-ok">已配置</span>
+          <span class="info-label">注册时间</span>
+          <span class="info-value">{{ user ? formatDate(user.date_joined) : '-' }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">系统版本</span>
+          <span class="info-value">v1.0.0</span>
         </div>
         <div class="info-row">
           <span class="info-label">Excel 导出</span>
@@ -37,9 +41,10 @@
         </div>
       </div>
 
-      <button class="back-btn" @click="$emit('back')">
-        ← 返回对话
-      </button>
+      <div class="profile-actions">
+        <button class="back-btn" @click="$emit('back')">← 返回对话</button>
+        <button v-if="user" class="logout-btn" @click="handleLogout">退出登录</button>
+      </div>
     </div>
   </div>
 </template>
@@ -48,7 +53,8 @@
 import { ref, onMounted } from "vue";
 import axios from "axios";
 
-const emit = defineEmits(["back"]);
+const emit = defineEmits(["back", "logout"]);
+const props = defineProps({ user: { type: Object, default: null } });
 const stats = ref({ conversations: 0, messages: 0 });
 
 onMounted(async () => {
@@ -57,10 +63,20 @@ onMounted(async () => {
     const convs = res.data;
     const totalMessages = convs.reduce((sum, c) => sum + (c.message_count || 0), 0);
     stats.value = { conversations: convs.length, messages: totalMessages };
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 });
+
+function formatDate(iso) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleDateString("zh-CN");
+}
+
+async function handleLogout() {
+  try {
+    await axios.post("/api/auth/logout/");
+    emit("logout");
+  } catch { /* ignore */ }
+}
 </script>
 
 <style scoped>
@@ -149,27 +165,20 @@ onMounted(async () => {
   border-bottom: 1px solid #eee;
 }
 
-.info-row:last-child {
-  border-bottom: none;
-}
+.info-row:last-child { border-bottom: none; }
 
-.info-label {
-  font-size: 14px;
-  color: #666;
-}
+.info-label { font-size: 14px; color: #666; }
+.info-value { font-size: 14px; color: #1a1a1a; font-weight: 500; }
+.status-ok { color: #2e7d32; }
 
-.info-value {
-  font-size: 14px;
-  color: #1a1a1a;
-  font-weight: 500;
-}
-
-.status-ok {
-  color: #2e7d32;
+.profile-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
 }
 
 .back-btn {
-  padding: 10px 32px;
+  padding: 10px 24px;
   background: #1a73e8;
   color: white;
   border: none;
@@ -179,7 +188,18 @@ onMounted(async () => {
   transition: opacity 0.15s;
 }
 
-.back-btn:hover {
-  opacity: 0.9;
+.back-btn:hover { opacity: 0.9; }
+
+.logout-btn {
+  padding: 10px 24px;
+  background: #ffffff;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
+
+.logout-btn:hover { background: #fef2f2; }
 </style>
