@@ -79,3 +79,48 @@ class LLMClient:
                     except json.JSONDecodeError:
                         continue
         return full_content
+
+    def chat_stream(self, messages, temperature=0.7, max_tokens=2048):
+        """流式调用 LLM API，逐个 yield 文本块。"""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+                timeout=120,
+                stream=True,
+            )
+            response.raise_for_status()
+
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode("utf-8")
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            delta = data["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except json.JSONDecodeError:
+                            continue
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"LLM 流式 API 请求失败: {e}")
+            raise
