@@ -7,9 +7,17 @@ services:
     expose:
       - "8000"
     # 如需直接访问后端可放开端口映射
-    # ports:
-    #   - "8000:8000"
+    ports:
+      - "8000:8000"
     restart: unless-stopped
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2.0"
+    #       memory: 2G
+    #     reservations:
+    #       cpus: "0.5"
+    #       memory: 512M
 
   frontend:
     build: ./frontend
@@ -17,5 +25,13 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "8007:80"
     restart: unless-stopped
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "0.5"
+    #       memory: 256M
+    #     reservations:
+    #       cpus: "0.25"
+    #       memory: 64M
