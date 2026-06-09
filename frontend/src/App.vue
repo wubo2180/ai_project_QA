@@ -396,6 +396,7 @@ body {
   display: flex;
   height: 100vh;
   width: 100vw;
+  background: #ffffff;
 }
 
 /* ===== 侧边栏 ===== */
