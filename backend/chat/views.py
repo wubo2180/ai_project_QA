@@ -91,9 +91,13 @@ def export_excel(request):
 @api_view(["GET"])
 def health_check(request):
     """健康检查接口。"""
+    # 只要任一模型配置了 api_key 即视为已配置
+    llm_configured = any(
+        cfg.get("api_key") for cfg in settings.AVAILABLE_MODELS.values()
+    )
     return Response({
         "status": "ok",
-        "llm_configured": bool(settings.LLM_API_KEY),
+        "llm_configured": llm_configured,
     })
 
 

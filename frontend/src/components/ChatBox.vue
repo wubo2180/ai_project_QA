@@ -86,6 +86,15 @@
             </option>
           </select>
 
+          <!-- 图片支持状态指示 -->
+          <span
+            class="image-status"
+            :class="{ active: currentModelSupportsImage }"
+            :title="currentModelSupportsImage ? '当前模型支持粘贴图片' : '当前模型不支持粘贴图片'"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </span>
+
           <button
             class="mode-toggle excel-toggle"
             :class="{ active: excelMode }"
@@ -135,7 +144,6 @@
           </template>
           <span v-else-if="excelMode" class="excel-mode-hint">📊 Excel 整理模式已开启，AI 回复将提供表格下载</span>
           <span v-else-if="webSearch" class="search-mode-hint">🌐 网页搜索模式已开启，AI 将搜索网络获取最新信息</span>
-          <span v-else-if="!currentModelSupportsImage" class="model-hint">💡 选择通义千问可粘贴图片</span>
           <span v-else>AI 助手可能会产生不准确的信息，请注意甄别。</span>
         </p>
       </div>
@@ -160,7 +168,7 @@ const inputRef = ref(null);
 const messagesRef = ref(null);
 const excelMode = ref(false);
 const webSearch = ref(false);
-const selectedModel = ref("deepseek");
+const selectedModel = ref("deepseek_flash");
 const models = ref({});
 const pastedImage = ref(null); // base64 data URL
 
@@ -175,6 +183,11 @@ onMounted(async () => {
   try {
     const res = await axios.get("/api/models/");
     models.value = res.data;
+    // 若默认模型不在列表中，回退到第一个可用模型
+    if (!models.value[selectedModel.value]) {
+      const keys = Object.keys(models.value);
+      if (keys.length) selectedModel.value = keys[0];
+    }
   } catch { /* ignore */ }
 });
 
@@ -614,6 +627,27 @@ watch(selectedModel, (newModel) => {
 .model-select:hover { border-color: #ccc; }
 .model-select:focus { border-color: #1a73e8; }
 .model-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 图片支持状态指示 */
+.image-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  color: #bbb;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  cursor: default;
+}
+.image-status.active {
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
 
 /* 模式切换按钮（原始样式） */
 .mode-toggle {

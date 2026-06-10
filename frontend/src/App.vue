@@ -329,7 +329,11 @@ async function handleSend(payload) {
             assistantMsg.streaming = false;
             streamFinished = true;
 
-            if (data.type === "done" || data.content) {
+            // 出错或内容为空时，给出占位提示，且不保存空消息到后端
+            if (!assistantMsg.content || !assistantMsg.content.trim()) {
+              assistantMsg.content = "抱歉，未能获取到回复，请稍后重试或更换模型。";
+              streamVersion.value++;
+            } else {
               try {
                 await axios.post(`/api/conversations/${conv.id}/messages/`, {
                   role: "assistant",

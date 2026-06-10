@@ -11,24 +11,15 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """通用 LLM API 客户端，兼容 OpenAI 格式的接口。"""
 
-    def __init__(self, provider="deepseek"):
+    def __init__(self, provider="deepseek_flash"):
         """初始化 LLM 客户端。
         Args:
-            provider: 模型供应商，'deepseek' 或 'qwen'
+            provider: 模型 key，对应 settings.AVAILABLE_MODELS 中的键
+                      （deepseek_flash / deepseek_pro / qwen_plus / qwen_max / gpt）
         """
-        providers = {
-            "deepseek": {
-                "api_key": settings.LLM_API_KEY,
-                "api_url": settings.LLM_API_URL,
-                "model": settings.LLM_MODEL,
-            },
-            "qwen": {
-                "api_key": settings.QWEN_API_KEY,
-                "api_url": settings.QWEN_API_URL,
-                "model": settings.QWEN_MODEL,
-            },
-        }
-        config = providers.get(provider, providers["deepseek"])
+        models = settings.AVAILABLE_MODELS
+        # 找不到对应 provider 时回退到默认模型
+        config = models.get(provider) or models.get("deepseek_flash") or next(iter(models.values()))
         self.api_key = config["api_key"]
         self.api_url = config["api_url"]
         self.model = config["model"]
@@ -79,6 +70,8 @@ class LLMClient:
             raise
 
     def _stream_lines(self, response):
+        # SSE 响应通常不带 charset，requests 会回退到 latin-1 导致中文乱码，强制 UTF-8
+        response.encoding = "utf-8"
         for line in response.iter_lines(chunk_size=1, decode_unicode=True):
             if not line or not line.startswith("data: "):
                 continue
@@ -134,11 +127,25 @@ class LLMClient:
             )
             response.raise_for_status()
 
+            yielded_any = False
             for data_str in self._stream_lines(response):
                 content = self._extract_delta_content(data_str)
                 if content:
+                    yielded_any = True
                     yield content
 
+            # 上游返回 200 但没有任何有效内容（常见于错误以非 SSE 的 JSON 返回）
+            if not yielded_any:
+                logger.warning("LLM 流式响应无有效内容，model=%s url=%s", self.model, self.api_url)
+
+        except requests.exceptions.HTTPError as e:
+            body = ""
+            try:
+                body = e.response.text[:500] if e.response is not None else ""
+            except Exception:
+                pass
+            logger.error("LLM 流式 API HTTP 错误: %s, 响应: %s", e, body)
+            raise
         except requests.exceptions.RequestException as e:
             logger.error(f"LLM 流式 API 请求失败: {e}")
             raise
