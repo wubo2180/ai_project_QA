@@ -2,10 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 加载 .env 文件
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# 加载 .env 文件（显式指定绝对路径，避免工作目录不同导致读取不到）
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = "django-insecure-dev-key-change-in-production"
 

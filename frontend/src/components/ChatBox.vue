@@ -95,6 +95,27 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           </span>
 
+          <!-- 文件上传按钮 -->
+          <button
+            class="file-upload-btn"
+            @click="triggerFileInput"
+            :disabled="loading"
+            title="添加文件"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+
+          <input
+            type="file"
+            ref="fileInputRef"
+            @change="handleFileSelect"
+            multiple
+            accept="image/*,.txt,.md,.csv,.json,.py,.js,.ts,.java,.c,.cpp,.html,.css,.xml,.yaml,.yml,.log,.sql,.sh,.bat,.ini,.cfg,.conf,.env,.toml,.rst,.tex,.rtf"
+            style="display: none"
+          />
+
           <button
             class="mode-toggle excel-toggle"
             :class="{ active: excelMode }"
@@ -128,10 +149,24 @@
             <img :src="pastedImage" />
             <span class="image-remove">×</span>
           </div>
+          <!-- 附加文件预览 -->
+          <div v-if="attachedFiles.length > 0" class="attached-files">
+            <div
+              v-for="(file, idx) in attachedFiles"
+              :key="idx"
+              class="file-chip"
+              :title="file.name"
+            >
+              <span class="file-chip-icon">{{ getFileIcon(file.type) }}</span>
+              <span class="file-chip-name">{{ file.name }}</span>
+              <span class="file-chip-size">{{ formatFileSize(file.size) }}</span>
+              <span class="file-chip-remove" @click="removeFile(idx)">×</span>
+            </div>
+          </div>
           <button
             class="send-btn"
-            :class="{ active: (inputText.trim() || pastedImage) && !loading }"
-            :disabled="!inputText.trim() && !pastedImage || loading"
+            :class="{ active: (inputText.trim() || pastedImage || attachedFiles.length > 0) && !loading }"
+            :disabled="!inputText.trim() && !pastedImage && attachedFiles.length === 0 || loading"
             @click="sendMessage"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -139,6 +174,7 @@
         </div>
         <p class="input-footer">
           <span v-if="pastedImage" class="image-hint">🖼️ 已粘贴图片</span>
+          <span v-else-if="attachedFiles.length > 0" class="file-hint">📎 已附加 {{ attachedFiles.length }} 个文件</span>
           <template v-else-if="excelMode && webSearch">
             <span class="excel-mode-hint">📊 Excel 模式 + 🌐 搜索模式 已同时开启</span>
           </template>
@@ -171,6 +207,19 @@ const webSearch = ref(false);
 const selectedModel = ref("deepseek_flash");
 const models = ref({});
 const pastedImage = ref(null); // base64 data URL
+const fileInputRef = ref(null);
+const attachedFiles = ref([]); // Array of { name, size, type, content, isImage, base64? }
+
+// 允许的文本文件扩展名
+const TEXT_EXTENSIONS = [
+  '.txt', '.md', '.csv', '.json', '.py', '.js', '.ts', '.java',
+  '.c', '.cpp', '.html', '.css', '.xml', '.yaml', '.yml', '.log',
+  '.sql', '.sh', '.bat', '.ini', '.cfg', '.conf', '.env', '.toml',
+  '.rst', '.tex', '.rtf'
+];
+
+// 最大文件大小：5MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 // 当前选择模型是否支持图片
 const currentModelSupportsImage = computed(() => {
@@ -200,16 +249,29 @@ function renderMarkdown(text) {
 function sendMessage(e) {
   if (e && e.shiftKey) return;
   const text = inputText.value.trim();
-  if ((!text && !pastedImage.value) || props.loading) return;
+  if ((!text && !pastedImage.value && attachedFiles.value.length === 0) || props.loading) return;
+  // 构建文件信息
+  const filesData = attachedFiles.value.map((file) => {
+    return {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isImage: file.isImage,
+      base64: file.isImage ? file.base64 : null,
+      content: file.isImage ? null : file.content,
+    };
+  });
   emit("send", {
     text: text || "请分析这张图片",
     excelMode: excelMode.value,
     webSearch: webSearch.value,
     model: selectedModel.value,
     imageData: extractBase64(pastedImage.value),
+    files: filesData,
   });
   inputText.value = "";
   pastedImage.value = null; // 发送后清除图片
+  attachedFiles.value = []; // 发送后清除附加文件
   inputRef.value?.focus();
 }
 
@@ -307,6 +369,102 @@ function handlePaste(e) {
 
 function clearImage() {
   pastedImage.value = null;
+}
+
+// 文件相关处理
+// 触发文件输入框点击
+function triggerFileInput() {
+  fileInputRef.value?.click();
+}
+
+// 获取文件图标
+function getFileIcon(type) {
+  if (type.startsWith('image/')) return '🖼️';
+  if (type.includes('pdf')) return '📄';
+  if (type.includes('word') || type.includes('document')) return '📝';
+  if (type.includes('sheet') || type.includes('excel') || type.includes('csv')) return '📊';
+  if (type.includes('json')) return '📋';
+  if (type.includes('python') || type.includes('javascript') || type.includes('java')) return '💻';
+  return '📎';
+}
+
+// 格式化文件大小
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// 判断是否为文本文件
+function isTextFile(file) {
+  if (file.type.startsWith('text/')) return true;
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  return TEXT_EXTENSIONS.includes(ext);
+}
+
+// 处理文件选择
+async function handleFileSelect(e) {
+  const files = Array.from(e.target.files || []);
+  for (const file of files) {
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`文件 "${file.name}" 超过 5MB 限制，已跳过`);
+      continue;
+    }
+    if (file.type.startsWith('image/')) {
+      // 图片：读取为 base64
+      const base64 = await readFileAsBase64(file);
+      attachedFiles.value.push({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        isImage: true,
+        base64: base64,
+        content: null,
+      });
+    } else if (isTextFile(file)) {
+      // 文本文件：读取内容
+      const content = await readFileAsText(file);
+      attachedFiles.value.push({
+        name: file.name,
+        size: file.size,
+        type: file.type || 'text/plain',
+        isImage: false,
+        base64: null,
+        content: content,
+      });
+    } else {
+      alert(`暂不支持文件类型: "${file.name}"，请上传图片或文本文件`);
+    }
+  }
+  // 重置 input 以便重复选择同一文件
+  if (fileInputRef.value) fileInputRef.value.value = '';
+}
+
+// 以 base64 方式读取文件
+function readFileAsBase64(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target.result;
+      const base64 = result.split(',')[1] || result;
+      resolve(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// 以文本方式读取文件
+function readFileAsText(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+// 移除附加的文件
+function removeFile(idx) {
+  attachedFiles.value.splice(idx, 1);
 }
 
 watch(
@@ -719,6 +877,75 @@ textarea {
   position: absolute;
   top: -4px;
   right: -4px;
+  width: 18px;
+  height: 18px;
+  background: #ff4444;
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* 文件上传按钮和文件预览相关样式 */
+.file-upload-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  transition: all 0.15s;
+}
+
+.file-upload-btn:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.attached-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f7f7f8;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  cursor: default;
+  transition: all 0.15s;
+  font-size: 13px;
+  color: #333;
+  position: relative;
+}
+
+.file-chip:hover {
+  background: #efeff0;
+  border-color: #d0d0d0;
+}
+
+.file-chip-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.file-chip-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
   width: 18px;
   height: 18px;
   background: #ff4444;
