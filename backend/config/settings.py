@@ -80,6 +80,10 @@ GPT_API_URL = os.getenv("GPT_API_URL", "https://api.lmuai.com/v1")
 GPT_API_KEY = os.getenv("GPT_API_KEY", "")
 GPT_5_5_MODEL = os.getenv("GPT_5_5_MODEL", "gpt-5.5")
 
+# LLM 配置 — Dify（当前对话问答使用）
+DIFY_API_URL = os.getenv("DIFY_API_URL", "http://47.115.90.4:8088/v1").strip().rstrip("/")
+DIFY_API_KEY = os.getenv("DIFY_API_KEY", "").strip()
+
 # 可用模型列表（供前端下拉选择）
 AVAILABLE_MODELS = {
     "deepseek_flash": {

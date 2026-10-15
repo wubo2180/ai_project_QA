@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .llm_api import LLMClient
+from .dify_api import DifyClient
 from .excel_export import extract_tables, tables_to_excel
 from .web_search import web_search, format_search_context
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def chat_message(request):
     """处理用户消息，调用 LLM 返回回复。"""
     user_message = request.data.get("message", "").strip()
-    history = request.data.get("history", [])
+    conversation_id = request.data.get("conversation_id") or None
 
     if not user_message:
         return Response(
@@ -27,21 +27,22 @@ def chat_message(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # 构建消息历史
-    messages = list(history)
-    messages.append({"role": "user", "content": user_message})
-
     try:
-        client = LLMClient()
-        reply = client.chat(messages)
+        client = DifyClient()
+        reply, conv_id = client.chat(
+            user_message,
+            user=str(getattr(request.user, "id", "web-user") or "web-user"),
+            conversation_id=conversation_id,
+        )
 
         return Response({
             "reply": reply,
+            "conversation_id": conv_id,
             "status": "success",
         })
 
     except Exception as e:
-        logger.exception("LLM 调用异常")
+        logger.exception("Dify 调用异常")
         return Response(
             {
                 "error": f"服务暂时不可用，请稍后重试",
@@ -91,10 +92,7 @@ def export_excel(request):
 @api_view(["GET"])
 def health_check(request):
     """健康检查接口。"""
-    # 只要任一模型配置了 api_key 即视为已配置
-    llm_configured = any(
-        cfg.get("api_key") for cfg in settings.AVAILABLE_MODELS.values()
-    )
+    llm_configured = bool(settings.DIFY_API_KEY)
     return Response({
         "status": "ok",
         "llm_configured": llm_configured,
@@ -112,50 +110,43 @@ def chat_stream(request):
         return HttpResponse(status=400)
 
     user_message = body.get("message", "").strip()
-    history = body.get("history", [])
     web_search_enabled = body.get("web_search", False)
-    model_provider = body.get("model", "deepseek")  # 默认 deepseek
-    image_data = body.get("image_data", None)  # base64 图片（仅 qwen 支持）
+    conversation_id = body.get("conversation_id") or None
+    user_id = str(getattr(request.user, "id", None) or "web-user")
 
     if not user_message:
         return HttpResponse(status=400)
 
     def event_stream():
-        messages = list(history)
+        query = user_message
 
-        # 如果开启网页搜索，先搜索并注入上下文
+        # 如果开启网页搜索，先搜索并把结果拼接到用户问题中
         if web_search_enabled:
             yield f"data: {json.dumps({'type': 'status', 'content': '正在搜索网页...'})}\n\n".encode("utf-8")
             search_results = web_search(user_message)
             if search_results:
                 search_context = format_search_context(user_message, search_results)
-                messages.append({"role": "system", "content": search_context})
+                query = f"{search_context}\n\n用户问题：{user_message}"
                 yield f"data: {json.dumps({'type': 'status', 'content': f'已获取 {len(search_results)} 条搜索结果'})}\n\n".encode("utf-8")
 
-        # 构建用户消息（支持图片多模态）
-        if image_data:
-            user_msg = {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_message},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}},
-                ],
-            }
-        else:
-            user_msg = {"role": "user", "content": user_message}
-        messages.append(user_msg)
-
         try:
-            client = LLMClient(provider=model_provider)
+            client = DifyClient()
             full_content = ""
-            for chunk in client.chat_stream(messages):
-                full_content += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n".encode("utf-8")
+            for event in client.chat_stream(query, user=user_id, conversation_id=conversation_id):
+                etype = event.get("type")
+                if etype == "chunk":
+                    full_content += event["content"]
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': event['content']})}\n\n".encode("utf-8")
+                elif etype == "conversation":
+                    yield f"data: {json.dumps({'type': 'conversation', 'conversation_id': event['conversation_id']})}\n\n".encode("utf-8")
+                elif etype == "error":
+                    yield f"data: {json.dumps({'type': 'error', 'content': event['content']})}\n\n".encode("utf-8")
+                    return
 
             yield f"data: {json.dumps({'type': 'done', 'content': full_content})}\n\n".encode("utf-8")
 
         except Exception as e:
-            logger.exception("LLM 流式调用异常")
+            logger.exception("Dify 流式调用异常")
             error_msg = str(e) if settings.DEBUG else "服务暂时不可用，请稍后重试"
             yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n".encode("utf-8")
 
@@ -166,16 +157,3 @@ def chat_stream(request):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
-
-
-@api_view(["GET"])
-def available_models(request):
-    """获取可用的模型列表（不含敏感字段）。"""
-    models = {}
-    for key, cfg in settings.AVAILABLE_MODELS.items():
-        models[key] = {
-            "label": cfg["label"],
-            "model": cfg["model"],
-            "supports_image": cfg["supports_image"],
-        }
-    return Response(models)

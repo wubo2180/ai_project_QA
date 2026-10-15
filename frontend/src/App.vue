@@ -219,7 +219,6 @@ async function handleSend(payload) {
   const text = typeof payload === "string" ? payload : payload.text;
   const excelMode = typeof payload === "string" ? false : payload.excelMode;
   const webSearch = typeof payload === "string" ? false : payload.webSearch;
-  const model = payload.model || "deepseek";
   const imageData = payload.imageData || null;
 
   // 获取当前对话对象
@@ -301,7 +300,11 @@ async function handleSend(payload) {
     const response = await fetch("/api/chat-stream/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text, history, web_search: webSearch, model, image_data: imageData }),
+      body: JSON.stringify({
+        message: text,
+        web_search: webSearch,
+        conversation_id: conv.difyConversationId || null,
+      }),
     });
 
     if (!response.ok || !response.body) throw new Error("Stream not available");
@@ -321,7 +324,10 @@ async function handleSend(payload) {
         if (!line.startsWith("data: ")) continue;
         try {
           const data = JSON.parse(line.slice(6));
-          if (data.type === "chunk") {
+          if (data.type === "conversation") {
+            // 记录 Dify 返回的会话 id，用于下一轮保持上下文
+            conv.difyConversationId = data.conversation_id;
+          } else if (data.type === "chunk") {
             assistantMsg.content += data.content;
             streamVersion.value++; // 触发重渲染
           } else if (data.type === "done" || data.type === "error") {

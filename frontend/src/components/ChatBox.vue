@@ -79,22 +79,6 @@
     <div class="input-area">
       <div class="input-container">
         <div class="input-wrapper">
-          <!-- 模型选择 -->
-          <select class="model-select" v-model="selectedModel" :disabled="loading">
-            <option v-for="(m, key) in models" :key="key" :value="key">
-              {{ m.label }} ({{ m.model }})
-            </option>
-          </select>
-
-          <!-- 图片支持状态指示 -->
-          <span
-            class="image-status"
-            :class="{ active: currentModelSupportsImage }"
-            :title="currentModelSupportsImage ? '当前模型支持粘贴图片' : '当前模型不支持粘贴图片'"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-          </span>
-
           <!-- 文件上传按钮 -->
           <button
             class="file-upload-btn"
@@ -188,9 +172,8 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted, computed } from "vue";
+import { ref, nextTick, watch, computed } from "vue";
 import { marked } from "marked";
-import axios from "axios";
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -204,8 +187,6 @@ const inputRef = ref(null);
 const messagesRef = ref(null);
 const excelMode = ref(false);
 const webSearch = ref(false);
-const selectedModel = ref("deepseek_flash");
-const models = ref({});
 const pastedImage = ref(null); // base64 data URL
 const fileInputRef = ref(null);
 const attachedFiles = ref([]); // Array of { name, size, type, content, isImage, base64? }
@@ -221,24 +202,8 @@ const TEXT_EXTENSIONS = [
 // 最大文件大小：5MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-// 当前选择模型是否支持图片
-const currentModelSupportsImage = computed(() => {
-  const m = models.value[selectedModel.value];
-  return m ? m.supports_image : false;
-});
-
-// 加载模型列表
-onMounted(async () => {
-  try {
-    const res = await axios.get("/api/models/");
-    models.value = res.data;
-    // 若默认模型不在列表中，回退到第一个可用模型
-    if (!models.value[selectedModel.value]) {
-      const keys = Object.keys(models.value);
-      if (keys.length) selectedModel.value = keys[0];
-    }
-  } catch { /* ignore */ }
-});
+// Dify 文本对话流不支持图片粘贴
+const currentModelSupportsImage = computed(() => false);
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -265,7 +230,6 @@ function sendMessage(e) {
     text: text || "请分析这张图片",
     excelMode: excelMode.value,
     webSearch: webSearch.value,
-    model: selectedModel.value,
     imageData: extractBase64(pastedImage.value),
     files: filesData,
   });
@@ -281,7 +245,6 @@ function sendSuggestion(text) {
     text,
     excelMode: excelMode.value,
     webSearch: webSearch.value,
-    model: selectedModel.value,
     imageData: null,
   });
   inputRef.value?.focus();
@@ -485,11 +448,6 @@ watch(() => inputText.value, () => {
   });
 });
 
-watch(selectedModel, (newModel) => {
-  if (newModel === "ernie-bot") {
-    pastedImage.value = null;
-  }
-});
 </script>
 
 <style scoped>
@@ -766,45 +724,6 @@ watch(selectedModel, (newModel) => {
 .input-wrapper:focus-within {
   border-color: #1a73e8;
   box-shadow: 0 2px 12px rgba(26,115,232,0.12);
-}
-
-/* 模型选择 */
-.model-select {
-  padding: 5px 8px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 12px;
-  font-family: inherit;
-  color: #333;
-  background: #fafafa;
-  cursor: pointer;
-  outline: none;
-  flex-shrink: 0;
-  max-width: 200px;
-}
-.model-select:hover { border-color: #ccc; }
-.model-select:focus { border-color: #1a73e8; }
-.model-select:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* 图片支持状态指示 */
-.image-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
-  background: #fafafa;
-  color: #bbb;
-  flex-shrink: 0;
-  transition: all 0.15s;
-  cursor: default;
-}
-.image-status.active {
-  background: #e8f5e9;
-  border-color: #4caf50;
-  color: #2e7d32;
 }
 
 /* 模式切换按钮（原始样式） */
