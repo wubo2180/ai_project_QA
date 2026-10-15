@@ -10,6 +10,13 @@
           </svg>
           <span>新建对话</span>
         </button>
+        <button class="kb-entry-btn" :class="{ active: showKnowledge }" @click="openKnowledge">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          <span>知识库</span>
+        </button>
       </div>
 
       <!-- 登录用户：显示历史对话列表 -->
@@ -75,6 +82,10 @@
         @back="showProfile = false"
         @logout="onLogout"
       />
+      <KnowledgeBase
+        v-else-if="showKnowledge"
+        @back="showKnowledge = false"
+      />
       <ChatBox
         v-else
         :messages="currentMessages"
@@ -91,10 +102,12 @@ import axios from "axios";
 import ChatBox from "./components/ChatBox.vue";
 import ProfilePage from "./components/ProfilePage.vue";
 import AuthPage from "./components/AuthPage.vue";
+import KnowledgeBase from "./components/KnowledgeBase.vue";
 
 const sidebarCollapsed = ref(false);
 const showProfile = ref(false);
 const showAuth = ref(false);
+const showKnowledge = ref(false);
 const user = ref(null);
 const conversations = ref([]);
 const activeConvId = ref(null);
@@ -163,6 +176,7 @@ function cancelRename() {
 
 // ---- 用户 ----
 function openUserPage() {
+  showKnowledge.value = false;
   showProfile.value = true;
   showAuth.value = false;
   if (!user.value) {
@@ -171,10 +185,18 @@ function openUserPage() {
   }
 }
 
+// ---- 知识库 ----
+function openKnowledge() {
+  showProfile.value = false;
+  showAuth.value = false;
+  showKnowledge.value = true;
+}
+
 function onLoginSuccess(u) {
   user.value = u;
   showAuth.value = false;
   showProfile.value = false;
+  showKnowledge.value = false;
   loadConversations();
 }
 
@@ -182,6 +204,7 @@ function onLogout() {
   user.value = null;
   showAuth.value = false;
   showProfile.value = false;
+  showKnowledge.value = false;
   conversations.value = [];
   activeConvId.value = null;
   localConv.value = null;
@@ -191,6 +214,7 @@ function onLogout() {
 function newChat() {
   showProfile.value = false;
   showAuth.value = false;
+  showKnowledge.value = false;
   // 创建一个临时对话对象，加入侧边栏
   const newConv = { id: null, _tempId: "new-" + Date.now(), title: "新对话", messages: [], _isNew: true };
   conversations.value.unshift(newConv);
@@ -201,6 +225,7 @@ function newChat() {
 async function switchConversation(conv) {
   showProfile.value = false;
   showAuth.value = false;
+  showKnowledge.value = false;
   localConv.value = null;
   activeConvId.value = conv.id;
   if (!conv.messages || conv.messages.length === 0) {
@@ -434,6 +459,13 @@ body {
   background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; color: #333; cursor: pointer; transition: all 0.15s;
 }
 .new-chat-btn:hover { background: #f5f5f5; border-color: #d0d0d0; }
+
+.kb-entry-btn {
+  width: 100%; margin-top: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; color: #333; cursor: pointer; transition: all 0.15s;
+}
+.kb-entry-btn:hover { background: #f5f5f5; border-color: #d0d0d0; }
+.kb-entry-btn.active { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
 
 .history-list { flex: 1; overflow-y: auto; padding: 8px; }
 .history-list::-webkit-scrollbar { width: 4px; }

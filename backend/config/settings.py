@@ -84,6 +84,12 @@ GPT_5_5_MODEL = os.getenv("GPT_5_5_MODEL", "gpt-5.5")
 DIFY_API_URL = os.getenv("DIFY_API_URL", "http://47.115.90.4:8088/v1").strip().rstrip("/")
 DIFY_API_KEY = os.getenv("DIFY_API_KEY", "").strip()
 
+# Dify 知识库（Dataset）配置
+DIFY_DATASET_BASE_URL = os.getenv("DIFY_DATASET_BASE_URL", "http://47.115.90.4:8088/v1/datasets").strip().rstrip("/")
+DIFY_DATASET_API_KEY = os.getenv("DIFY_DATASET_API_KEY", "").strip()
+# 默认展示的知识库名称
+DIFY_DATASET_NAME = os.getenv("DIFY_DATASET_NAME", "新污染物").strip()
+
 # 可用模型列表（供前端下拉选择）
 AVAILABLE_MODELS = {
     "deepseek_flash": {

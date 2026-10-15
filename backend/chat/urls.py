@@ -20,4 +20,6 @@ urlpatterns = [
     path("auth/logout/", views_auth.user_logout, name="logout"),
     path("auth/me/", views_auth.current_user, name="current-user"),
     path("auth/csrf/", views_auth.get_csrf_token, name="csrf"),
+    # 知识库
+    path("knowledge-base/", views.knowledge_base, name="knowledge-base"),
 ]

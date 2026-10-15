@@ -9,6 +9,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .dify_api import DifyClient
+from .dify_dataset import DifyDatasetClient
 from .excel_export import extract_tables, tables_to_excel
 from .web_search import web_search, format_search_context
 
@@ -157,3 +158,75 @@ def chat_stream(request):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+@api_view(["GET"])
+def knowledge_base(request):
+    """获取默认知识库（新污染物）信息及其文档列表。
+
+    可选查询参数：
+      keyword: 按文件名关键字过滤
+    """
+    keyword = request.query_params.get("keyword", "").strip() or None
+    dataset_name = settings.DIFY_DATASET_NAME
+
+    if not settings.DIFY_DATASET_API_KEY:
+        return Response(
+            {"error": "知识库未配置，请设置 DIFY_DATASET_API_KEY"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        client = DifyDatasetClient()
+        dataset = client.find_dataset_by_name(dataset_name)
+        if not dataset:
+            return Response(
+                {"error": f"未找到名为「{dataset_name}」的知识库"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        documents, total = client.list_documents(dataset["id"], keyword=keyword)
+
+        files = []
+        for doc in documents:
+            info = doc.get("data_source_detail_dict", {}).get("upload_file", {})
+            files.append({
+                "id": doc.get("id"),
+                "name": doc.get("name"),
+                "word_count": doc.get("word_count", 0),
+                "tokens": doc.get("tokens", 0),
+                "size": info.get("size", 0),
+                "extension": info.get("extension", ""),
+                "mime_type": info.get("mime_type", ""),
+                "indexing_status": doc.get("indexing_status", ""),
+                "display_status": doc.get("display_status", ""),
+                "enabled": doc.get("enabled", True),
+                "archived": doc.get("archived", False),
+                "hit_count": doc.get("hit_count", 0),
+                "doc_form": doc.get("doc_form", ""),
+                "created_from": doc.get("created_from", ""),
+                "error": doc.get("error"),
+                "created_at": doc.get("created_at"),
+            })
+
+        return Response({
+            "dataset": {
+                "id": dataset.get("id"),
+                "name": dataset.get("name"),
+                "description": dataset.get("description"),
+                "document_count": dataset.get("document_count", total),
+                "word_count": dataset.get("word_count", 0),
+            },
+            "files": files,
+            "total": total,
+        })
+
+    except Exception as e:
+        logger.exception("知识库查询异常")
+        return Response(
+            {
+                "error": "知识库服务暂时不可用，请稍后重试",
+                "detail": str(e) if settings.DEBUG else "",
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
